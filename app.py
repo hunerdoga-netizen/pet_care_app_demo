@@ -51,34 +51,71 @@ else:
     task_type = t2.selectbox("Type", ["walk", "medicine", "feeding", "appointment"])
     task_time = t3.time_input("Time", value=datetime.strptime("08:00", "%H:%M").time())
     priority = t4.selectbox("Priority", ["high", "medium", "low"], index=1)
-    daily = st.checkbox("Repeats daily (e.g. medicine, feeding)")
+    frequency = st.selectbox("Repeats", ["once", "daily", "weekly"])
     if st.button("Add task"):
         pet = next(p for p in owner.pets if p.name == pet_choice)
         pet.add_task(
-            Task(description, task_type, task_time.strftime("%H:%M"), priority, daily)
+            Task(description, task_type, task_time.strftime("%H:%M"), priority, frequency)
         )
 
     # --- Today's schedule ---
     st.divider()
     st.subheader(f"Today's schedule ({today.isoformat()})")
+    st.caption("High priority first, then by time.")
+
+    for warning in scheduler.detect_conflicts(today):
+        st.warning(f"⚠️ {warning}. Move one of these tasks to a different time.")
+
     plan = scheduler.build_daily_plan(today)
     if not plan:
         st.info("No tasks for today.")
-    for i, task in enumerate(plan):
+    for task in plan:
         pet = owner.pet_for(task)
         done = st.checkbox(
-            f"{task.time} · {pet.name} · {task.description} [{task.priority}]",
-            value=task.is_done(today),
-            key=f"done-{i}-{task.description}-{task.time}",
+            f"{task.time} · {pet.name} · {task.description} [{task.priority}]"
+            + (f" · repeats {task.frequency}" if task.frequency != "once" else ""),
+            value=task.completed,
+            key=f"done-{id(task)}",
         )
-        if done and not task.is_done(today):
-            task.mark_complete(today)
+        if done and not task.completed:
+            scheduler.mark_task_complete(task)  # creates the next one if recurring
             st.rerun()
         busy = scheduler.busy_commitment(task)
         if busy:
-            st.warning(f"You're busy ({busy.label}) at {task.time}.")
+            st.caption(f"⏳ You're busy ({busy.label}) at {task.time}.")
 
-    # --- Reminders ---
+    if plan and all(t.completed for t in plan):
+        st.success("All of today's tasks are done! 🎉")
+
     reminders = scheduler.get_reminders(datetime.now())
     if reminders:
         st.error("Due now: " + ", ".join(t.description for t in reminders))
+
+    # --- Browse / filter all tasks ---
+    st.divider()
+    st.subheader("All tasks")
+    f1, f2 = st.columns(2)
+    pet_filter = f1.selectbox("Pet", ["All"] + [p.name for p in owner.pets])
+    status_filter = f2.selectbox("Status", ["All", "Not done", "Done"])
+    completed = {"All": None, "Not done": False, "Done": True}[status_filter]
+    shown = scheduler.filter_tasks(
+        None if pet_filter == "All" else pet_filter, completed
+    )
+    shown = sorted(shown, key=lambda t: (t.due_date, t.time))
+    if shown:
+        st.table(
+            [
+                {
+                    "Date": t.due_date.isoformat(),
+                    "Time": t.time,
+                    "Pet": owner.pet_for(t).name,
+                    "Task": t.description,
+                    "Priority": t.priority,
+                    "Repeats": t.frequency,
+                    "Done": "✅" if t.completed else "",
+                }
+                for t in shown
+            ]
+        )
+    else:
+        st.info("No tasks match this filter.")

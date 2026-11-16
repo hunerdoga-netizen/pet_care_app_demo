@@ -1,8 +1,8 @@
 """PawPal+ logic layer: Owner, Commitment, Pet, Task and Scheduler."""
 
-from dataclasses import dataclass, field
-from datetime import date, datetime
-from typing import List, Optional, Set
+from dataclasses import dataclass, field, replace
+from datetime import date, datetime, timedelta
+from typing import List, Optional
 
 PRIORITY_ORDER = {"high": 0, "medium": 1, "low": 2}
 
@@ -28,23 +28,20 @@ class Task:
     type: str  # "medicine", "feeding", "walk", "appointment", ...
     time: str  # "HH:MM"
     priority: str = "medium"  # "low", "medium" or "high"
-    daily: bool = False
+    frequency: str = "once"  # "once", "daily" or "weekly"
     due_date: date = field(default_factory=date.today)
-    done_dates: Set[date] = field(default_factory=set)
+    completed: bool = False
 
-    def occurs_on(self, day: date) -> bool:
-        """Return True if this task is scheduled for the given day."""
-        if self.daily:
-            return day >= self.due_date
-        return day == self.due_date
-
-    def mark_complete(self, day: Optional[date] = None) -> None:
-        """Tick this task as done for the given day (default: today)."""
-        self.done_dates.add(day or date.today())
-
-    def is_done(self, day: Optional[date] = None) -> bool:
-        """Return True if this task has been ticked for the given day."""
-        return (day or date.today()) in self.done_dates
+    def mark_complete(self) -> Optional["Task"]:
+        """Tick this task as done; return the next occurrence if it recurs."""
+        self.completed = True
+        if self.frequency == "daily":
+            step = timedelta(days=1)
+        elif self.frequency == "weekly":
+            step = timedelta(weeks=1)
+        else:
+            return None
+        return replace(self, due_date=self.due_date + step, completed=False)
 
 
 @dataclass
@@ -83,7 +80,7 @@ class Owner:
     def pet_for(self, task: Task) -> Optional[Pet]:
         """Return the pet that owns the given task."""
         for pet in self.pets:
-            if task in pet.tasks:
+            if any(t is task for t in pet.tasks):
                 return pet
         return None
 
@@ -95,8 +92,12 @@ class Scheduler:
         self.owner = owner
 
     def get_tasks_for(self, day: date) -> List[Task]:
-        """Return all tasks (across all pets) that occur on the given day."""
-        return [t for t in self.owner.get_all_tasks() if t.occurs_on(day)]
+        """Return all tasks (across all pets) due on the given day."""
+        return [t for t in self.owner.get_all_tasks() if t.due_date == day]
+
+    def sort_by_time(self, tasks: List[Task]) -> List[Task]:
+        """Return tasks in chronological order using their "HH:MM" time."""
+        return sorted(tasks, key=lambda t: t.time)
 
     def build_daily_plan(self, day: date) -> List[Task]:
         """Return the day's tasks ordered by priority (high first), then time."""
@@ -104,6 +105,41 @@ class Scheduler:
             self.get_tasks_for(day),
             key=lambda t: (PRIORITY_ORDER.get(t.priority, 1), t.time),
         )
+
+    def filter_tasks(
+        self, pet_name: Optional[str] = None, completed: Optional[bool] = None
+    ) -> List[Task]:
+        """Return tasks filtered by pet name and/or completion status."""
+        tasks = []
+        for pet in self.owner.pets:
+            if pet_name is not None and pet.name != pet_name:
+                continue
+            for task in pet.tasks:
+                if completed is None or task.completed == completed:
+                    tasks.append(task)
+        return tasks
+
+    def mark_task_complete(self, task: Task) -> Optional[Task]:
+        """Complete a task and add its next occurrence to the same pet."""
+        pet = self.owner.pet_for(task)
+        next_task = task.mark_complete()
+        if next_task and pet:
+            pet.add_task(next_task)
+        return next_task
+
+    def detect_conflicts(self, day: date) -> List[str]:
+        """Return warning messages for tasks sharing the same time on a day."""
+        by_time = {}
+        for task in self.get_tasks_for(day):
+            by_time.setdefault(task.time, []).append(task)
+        warnings = []
+        for time, tasks in sorted(by_time.items()):
+            if len(tasks) > 1:
+                names = ", ".join(
+                    f"{self.owner.pet_for(t).name}: {t.description}" for t in tasks
+                )
+                warnings.append(f"Conflict at {time}: {names}")
+        return warnings
 
     def busy_commitment(self, task: Task) -> Optional[Commitment]:
         """Return the owner's commitment that overlaps the task time, if any."""
@@ -119,5 +155,5 @@ class Scheduler:
         return [
             t
             for t in self.build_daily_plan(now.date())
-            if t.time <= current and not t.is_done(now.date())
+            if t.time <= current and not t.completed
         ]

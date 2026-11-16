@@ -12,7 +12,7 @@ def print_schedule(scheduler: Scheduler, day: date) -> None:
     print("-" * 62)
     for task in scheduler.build_daily_plan(day):
         pet = owner.pet_for(task)
-        tick = "[x]" if task.is_done(day) else "[ ]"
+        tick = "[x]" if task.completed else "[ ]"
         line = (
             f"{tick} {task.time}  {pet.name:<7} {task.description:<18} "
             f"{task.priority:<6}"
@@ -34,15 +34,34 @@ def main() -> None:
 
     today = date.today()
     mochi.add_task(Task("Morning walk", "walk", "07:30", "medium"))
-    mochi.add_task(Task("Joint medicine", "medicine", "08:00", "high", daily=True))
+    mochi.add_task(Task("Joint medicine", "medicine", "08:00", "high", "daily"))
     mochi.add_task(Task("Vet appointment", "appointment", "10:00", "high"))
-    luna.add_task(Task("Breakfast", "feeding", "07:45", "medium", daily=True))
-    luna.add_task(Task("Evening feeding", "feeding", "18:00", "medium", daily=True))
+    luna.add_task(Task("Breakfast", "feeding", "07:45", "medium", "daily"))
+    luna.add_task(Task("Evening feeding", "feeding", "18:00", "medium", "daily"))
 
-    # Tick today's medicine, like checking it off in the app.
-    mochi.tasks[1].mark_complete(today)
+    # Added out of order on purpose, and at the same time as Mochi's vet visit.
+    luna.add_task(Task("Grooming", "appointment", "10:00", "low"))
 
     scheduler = Scheduler(owner)
+    print_schedule(scheduler, today)
+
+    print("\nSorted by time only:")
+    for t in scheduler.sort_by_time(scheduler.get_tasks_for(today)):
+        print(f"  {t.time}  {owner.pet_for(t).name:<7} {t.description}")
+
+    print("\nConflict warnings:")
+    for warning in scheduler.detect_conflicts(today):
+        print(f"  ! {warning}")
+
+    # Complete the daily medicine: a new one is created for tomorrow.
+    medicine = mochi.tasks[1]
+    next_task = scheduler.mark_task_complete(medicine)
+    print(f"\nCompleted '{medicine.description}'; next due {next_task.due_date}")
+    print("\nIncomplete tasks for Mochi:")
+    for t in scheduler.filter_tasks(pet_name="Mochi", completed=False):
+        print(f"  {t.due_date} {t.time}  {t.description}")
+
+    print()
     print_schedule(scheduler, today)
 
 
