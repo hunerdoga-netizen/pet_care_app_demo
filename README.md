@@ -42,16 +42,29 @@ pip install -r requirements.txt
 6. Connect your logic to the Streamlit UI in `app.py`.
 7. Refine UML so it matches what you actually built.
 
+## 🧩 Implementation Summary
+
+All logic lives in `pawpal_system.py`; `main.py` is a terminal demo and `app.py` is the Streamlit UI.
+
+- `Task` (dataclass): description, type, time (`HH:MM`), priority, `daily` flag and a set of `done_dates`. `mark_complete()` ticks a day.
+- `Pet` (dataclass): name, species and its list of tasks.
+- `Commitment` (dataclass): a busy block (label, start, end) for the owner, e.g. work hours.
+- `Owner` (dataclass): pets and commitments. `get_all_tasks()` returns every pet's tasks together.
+- `Scheduler`: reads from `Owner.get_all_tasks()`, builds the daily plan (priority first, then time), flags tasks that land in a commitment, and returns due reminders.
+- `app.py` keeps the `Owner` in `st.session_state` so data survives Streamlit reruns.
+
 ## 🖥️ Sample Output
 
-Paste a sample of your app's CLI or Streamlit output here so a reader can see what a generated plan looks like:
+Output of `python main.py`. High-priority tasks come first, then by time. `[x]` marks a task ticked off today, and the vet visit is flagged because it falls inside the owner's work hours:
 
 ```
-# e.g.:
-# Daily plan for Biscuit (Golden Retriever):
-#   08:00 — Morning walk (30 min) [priority: high]
-#   09:00 — Feeding (10 min) [priority: high]
-#   ...
+Today's Schedule for Jordan (2026-11-16)
+--------------------------------------------------------------
+[x] 08:00  Mochi   Joint medicine     high  
+[ ] 10:00  Mochi   Vet appointment    high    ! owner busy: Work
+[ ] 07:30  Mochi   Morning walk       medium
+[ ] 07:45  Luna    Breakfast          medium
+[ ] 18:00  Luna    Evening feeding    medium
 ```
 
 ## 🧪 Testing PawPal+
